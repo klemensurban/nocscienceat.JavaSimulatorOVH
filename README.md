@@ -105,4 +105,4 @@ Optionally create a `datarefs.json` file for dataref override (panel includes re
 MIT License - see LICENSE.txt
 
 ## Repository
-https://github.com/klemensurban/JavaSimulator.Console
+https://github.com/klemensurban/nocscienceat.JavaSimulatorOVH

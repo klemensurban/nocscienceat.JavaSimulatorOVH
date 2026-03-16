@@ -13,8 +13,8 @@
     <PackageTags>xplane;overhead;simulator;flight;java-simulator;hardware</PackageTags>
     <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageProjectUrl>https://github.com/klemensurban/JavaSimulator.Console</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/klemensurban/JavaSimulator.Console</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/klemensurban/nocscienceat.JavaSimulatorOVH</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/klemensurban/nocscienceat.JavaSimulatorOVH</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
 
     <!-- Package generation -->
