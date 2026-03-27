@@ -2,6 +2,7 @@
 
 public partial class OvhPanelHandler
 {
+    /// <inheritdoc/>
     protected override void RegisterDataRefsAndCommands()
     {
         RegisterDataRefs(new (string, string)[]
@@ -78,7 +79,11 @@ public partial class OvhPanelHandler
             ("OhpBrightness", "AirbusFBW/OHPBrightnessLevel"),
             ("IR1_Switch", "AirbusFBW/IRSwitchArray[0]"),
             ("IR2_Switch", "AirbusFBW/IRSwitchArray[1]"),
-            ("IR3_Switch", "AirbusFBW/IRSwitchArray[2]")
+            ("IR3_Switch", "AirbusFBW/IRSwitchArray[2]"),
+
+            // Position tracking
+            ("Latitude", "sim/flightmodel/position/latitude"),
+            ("Longitude", "sim/flightmodel/position/longitude")
         });
 
         RegisterCommands(new (string, string)[]

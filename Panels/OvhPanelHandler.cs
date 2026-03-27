@@ -26,14 +26,14 @@ public partial class OvhPanelHandler : JavaSimulatorPanelHandlerBase
     private int _adirs3Ir;            // ADIRS 3 IR switch state
     private int _adirs2Ir;            // ADIRS 2 IR switch state
     private float _panelBrightness;     // Panel brightness (cached to avoid redundant sends)
-    private int _lightDomeHandshake = -1;    // Written by connector thread, read by connect flow (Volatile access)
     private readonly HashSet<string> _initReceivedCommands = [];  // T/R commands received during init
     private bool _initSyncComplete;                               // Stops tracking after sync is done
+    private bool _teleportRecoveryActive;                          // Guard against overlapping recovery (work queue only)
+
 
     public override string PanelName => "OVH";
 
-    public OvhPanelHandler(IXPlaneWebConnector connector, IConfiguration configuration, ILogger<OvhPanelHandler> logger,
-        IDataRefCommandProvider? overrideProvider = null)
+    public OvhPanelHandler(IXPlaneWebConnector connector, IConfiguration configuration, ILogger<OvhPanelHandler> logger, IDataRefCommandProvider? overrideProvider = null)
         : base(connector, configuration, logger, overrideProvider)
     {
         // Build command dispatch table 
@@ -84,54 +84,34 @@ public partial class OvhPanelHandler : JavaSimulatorPanelHandlerBase
         };
     }
 
+    protected override async Task OnDisconnectingAsync()
+    {
+
+        await base.OnDisconnectingAsync();
+    }
+
 
     protected override async Task OnConnectedAsync(CancellationToken cancellationToken)
     {
-        // Subscribe to LightDome for round-trip handshake verification.
-        // The callback fires on a connector thread; OnConnectedAsync runs on the connect
-        // flow, so we use Volatile for thread-safe access to _lightDomeHandshake.
-        
+        // Wait for the ToLiss AirbusFBW plugin to confirm it is alive.
+        // The handshake (DIM/OFF cycle on LightDome) runs on a background task
+        // inside the virtual dataref provider — we just trigger and await the result.
+        var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         IDisposable handshakeSub = await _connector.SubscribeAsync(
-            GetDataRefPath("LightDome"),
-            (int value) => Volatile.Write(ref _lightDomeHandshake, value));
+            "xplanewebconnector/AirbusFBWalive",
+            (int v) => { if (v == 1) tcs.TrySetResult(v); });
 
         try
         {
-            string lightDomePath = GetDataRefPath("LightDome");
-            bool handshakeComplete = false;
-
-            while (!handshakeComplete)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                // Set DIM (1)
-                await _connector.SetDataRefValueAsync(lightDomePath, 1);
-                await Task.Delay(500, cancellationToken);
-                bool dimConfirmed = Volatile.Read(ref _lightDomeHandshake) == 1;
-
-                await Task.Delay(500, cancellationToken);
-
-                // Set OFF (0)
-                await _connector.SetDataRefValueAsync(lightDomePath, 0);
-                await Task.Delay(500, cancellationToken);
-                bool offConfirmed = Volatile.Read(ref _lightDomeHandshake) == 0;
-
-                await Task.Delay(500, cancellationToken);
-
-                handshakeComplete = dimConfirmed && offConfirmed;
-
-                if (!handshakeComplete)
-                    _logger.LogDebug("OVH: LightDome handshake cycle incomplete (dim={Dim}, off={Off}), retrying ...",
-                        dimConfirmed, offConfirmed);
-            }
-
-            _logger.LogInformation("OVH: LightDome round-trip handshake verified");
+            await _connector.SetDataRefValueAsync("xplanewebconnector/AirbusFBWalive", 1);
+            await tcs.Task.WaitAsync(cancellationToken);
+            _logger.LogInformation("OVH: AirbusFBW alive handshake verified");
         }
         finally
         {
             handshakeSub.Dispose();
         }
-        
+
         await base.OnConnectedAsync(cancellationToken);
 
         // After serial init the hardware reports non-zero toggle/rotary positions.
@@ -358,6 +338,90 @@ public partial class OvhPanelHandler : JavaSimulatorPanelHandlerBase
 
         await Task.WhenAll(warmUpTasks);
         _logger.LogInformation("OVH: Pre-resolved {Count} dataref/command IDs", warmUpTasks.Count);
+
+
+
+        // ========================================================================
+        // TELEPORT DETECTION (virtual dataref)
+        // ========================================================================
+
+        await SubscribeEnqueuedAsync("xplanewebconnector/teleport", (int level) =>
+        {
+            _logger.LogInformation("OVH: Teleport detected (level={Level})", level);
+            if (level >= 2 && !_teleportRecoveryActive)
+            {
+                _teleportRecoveryActive = true;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await Task.Delay(500, cancellationToken);
+                        EnqueueWork(async () =>
+                        {
+                            try { await HandleTeleportAsync(cancellationToken); }
+                            finally { _teleportRecoveryActive = false; }
+                        });
+                    }
+                    catch (OperationCanceledException) { }
+                }, cancellationToken);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Resets the serial port and re-syncs switch states after a teleport.
+    /// Runs on the panel work queue — but must return quickly so that
+    /// ProcessCommandAsync items (T/R switch reports from the Arduino)
+    /// can drain during the wait period. The delayed sync is scheduled
+    /// off the work queue, same pattern as the normal startup.
+    /// </summary>
+    private async Task HandleTeleportAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("OVH: Teleport recovery — waiting for AirbusFBW alive");
+
+        // Wait for X-Plane / ToLiss plugin to be responsive after scenery reload.
+        // The handshake runs on a background task inside the provider — the panel
+        // work queue blocks here but the Callback Task remains free (no deadlock).
+        var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        IDisposable aliveSub = await _connector.SubscribeAsync(
+            "xplanewebconnector/AirbusFBWalive",
+            (int v) => { if (v == 1) tcs.TrySetResult(v); });
+        try
+        {
+            await _connector.SetDataRefValueAsync("xplanewebconnector/AirbusFBWalive", 1);
+            await tcs.Task.WaitAsync(cancellationToken);
+            _logger.LogInformation("OVH: AirbusFBW alive confirmed — resetting serial port");
+        }
+        finally
+        {
+            aliveSub.Dispose();
+        }
+
+        await ResetSerialPortAsync(cancellationToken);
+
+        // Reset tracking before CHKD so ProcessCommandAsync records
+        // the T/R commands the Arduino reports during boot.
+        _initReceivedCommands.Clear();
+        _initSyncComplete = false;
+
+        // Send init commands — Arduino will process them once it finishes booting.
+        SendToHardware("PCB");
+        SendToHardware("VER");
+        SendToHardware("CHKD");
+
+        // Schedule delayed sync OFF the work queue so that ProcessCommandAsync
+        // items (T/R switch reports) can drain during the wait.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(5000, cancellationToken);
+                EnqueueWork(SyncUnreportedSwitchStatesAsync);
+            }
+            catch (OperationCanceledException) { }
+        }, cancellationToken);
+        HasValueChanged("BT1", "0");
+        HasValueChanged("BT2", "0");
     }
 
     protected override async Task ProcessCommandAsync(string command, string value)
