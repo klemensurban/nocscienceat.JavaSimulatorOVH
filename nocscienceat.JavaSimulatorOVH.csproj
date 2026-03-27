@@ -37,10 +37,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.201" PrivateAssets="All" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\nocscienceat.XPlanePanel\nocscienceat.XPlanePanel.csproj" />
+    <PackageReference Include="nocscienceat.XPlanePanel" Version="1.0.1" />
   </ItemGroup>
 
   <ItemGroup>
