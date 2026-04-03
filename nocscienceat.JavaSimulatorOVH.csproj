@@ -7,7 +7,7 @@
 
     <!-- NuGet package metadata -->
     <PackageId>nocscienceat.JavaSimulatorOVH</PackageId>
-  <Version>1.0.1</Version>
+  <Version>1.0.2</Version>
     <Authors>klemensurban</Authors>
     <Description>Java Simulator OVH Panel implementation for the nocscienceat.XPlanePanel, nocscienceat.XPlaneWebConnector framework</Description>
     <PackageTags>xplane;overhead;simulator;flight;java-simulator;hardware</PackageTags>
@@ -37,7 +37,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.201" PrivateAssets="All" />
-    <PackageReference Include="nocscienceat.XPlanePanel" Version="1.0.1" />
+    <PackageReference Include="nocscienceat.XPlanePanel" Version="1.0.2" />
   </ItemGroup>
 
   <ItemGroup>
